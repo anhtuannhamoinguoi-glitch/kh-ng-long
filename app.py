@@ -88,7 +88,8 @@ game_html = r"""
   const W = canvas.width, H = canvas.height, groundY = 318;
   let state = "ready"; // ready, running, paused, over
   let lastTime = 0, elapsed = 0, score = 0, speed = 6, spawnTimer = 0, cloudTimer = 0;
-  let obstacles = [], particles = [], clouds = [];
+  let obstacles = [], particles = [], clouds = [], ambientDust = [];
+  let screenShake = 0;
   const difficultySettings = {
     easy:    {label:"DỄ", base:0.75, growth:0.0009, max:1.8, scoreRate:10},
     normal:  {label:"BÌNH THƯỜNG", base:1.0, growth:0.0015, max:2.5, scoreRate:10},
@@ -101,7 +102,7 @@ game_html = r"""
   try { best = Number(localStorage.getItem("dinoRunBest") || 0) || 0; } catch (_) {}
   bestEl.textContent = String(best).padStart(5, "0");
 
-  const dino = { x: 112, y: groundY - 52, w: 48, h: 52, vy: 0, onGround: true, duck: false, anim: 0 };
+  const dino = { x: 112, y: groundY - 52, w: 48, h: 52, vy: 0, onGround: true, duck: false, anim: 0, squash: 1, blink: 0, trail: 0 };
   const rand = (a,b) => a + Math.random() * (b-a);
 
   function reset() {
@@ -144,6 +145,9 @@ game_html = r"""
     // sun / moon
     if(night < .65) { rect(765,55,46,46,"#ffe59a"); rect(775,45,26,10,"#ffe59a"); }
     else { rect(765,55,38,38,"#e7f0dc"); rect(785,48,25,38,rgb(top,darkTop,night)); }
+    // far parallax ridge
+    ctx.fillStyle = night > .5 ? "#293f4b" : "#e8ac63";
+    ctx.beginPath(); ctx.moveTo(0,230); ctx.lineTo(90,195); ctx.lineTo(160,222); ctx.lineTo(265,185); ctx.lineTo(360,230); ctx.lineTo(485,192); ctx.lineTo(600,230); ctx.lineTo(745,188); ctx.lineTo(850,225); ctx.lineTo(960,195); ctx.lineTo(960,groundY); ctx.lineTo(0,groundY); ctx.fill();
     // distant mountains
     ctx.fillStyle = night > .5 ? "#40545a" : "#d69b57";
     ctx.beginPath(); ctx.moveTo(0,250); ctx.lineTo(105,155); ctx.lineTo(185,235); ctx.lineTo(310,145); ctx.lineTo(435,250); ctx.lineTo(555,180); ctx.lineTo(680,250); ctx.lineTo(820,165); ctx.lineTo(960,250); ctx.lineTo(960,groundY); ctx.lineTo(0,groundY); ctx.fill();
@@ -164,33 +168,63 @@ game_html = r"""
       rect(x,groundY-9,3,9,night>.5?"#526b4c":"#638047");
       rect(x-4,groundY-6,4,3,night>.5?"#526b4c":"#638047");
     }
+    // moving dust motes near the ground add a sense of speed
+    ambientDust.forEach(p=>{
+      p.x -= speed*0.42*p.s;
+      if(p.x<0){p.x=W+rand(0,80);p.y=rand(groundY+4,H-5);}
+      ctx.globalAlpha=p.a;
+      rect(p.x,p.y,p.s,p.s,night>.5?"#e4d9a3":"#fff0c4");
+    });
+    ctx.globalAlpha=1;
   }
   function drawDino() {
-    const x=dino.x, y=dino.y, run=Math.floor(dino.anim/7)%2;
-    const green="#36784b", light="#64a95b", shade="#214c3c", cream="#e8d99d";
-    // tail
-    rect(x,y+27,12,9,shade); rect(x-8,y+24,10,7,green);
-    // body and neck
-    rect(x+8,y+18,26,25,green); rect(x+23,y+9,13,19,light);
-    rect(x+26,y+2,21,19,green); rect(x+38,y+14,14,8,green);
-    // jaw
-    rect(x+35,y+19,16,5,shade);
-    // spikes
-    rect(x+9,y+12,7,7,light); rect(x+18,y+9,7,7,light); rect(x+27,y+7,6,6,light);
-    // eye
-    rect(x+39,y+6,4,4,"#fff5d5"); rect(x+41,y+7,2,2,"#1c2b26");
-    // belly
-    rect(x+13,y+31,16,7,cream);
-    // legs animate
-    if(!dino.onGround) {
-      rect(x+12,y+40,7,11,shade); rect(x+27,y+40,7,9,shade);
-      rect(x+7,y+49,13,3,green); rect(x+25,y+48,13,3,green);
+    const run=Math.floor(dino.anim/6)%2;
+    const airborne=!dino.onGround;
+    const stretch=airborne?1.05:dino.squash;
+    const bob=(!airborne && run===0)?1:0;
+    const x=dino.x, y=dino.y + bob;
+    ctx.save();
+    // Soft pixel shadow changes size while jumping.
+    ctx.globalAlpha=airborne?.18:.28;
+    rect(x-1,groundY-3,48*(airborne?.72:1),4,"#29352d");
+    ctx.globalAlpha=1;
+    // squash/stretch around feet to make the jump feel less rigid
+    ctx.translate(x+24, y+52);
+    ctx.scale(1/stretch, stretch);
+    ctx.translate(-(x+24), -(y+52));
+    const green="#36784b", light="#70b85e", shade="#214c3c", cream="#e8d99d", highlight="#9bd16b";
+    // tail with two-tone tip
+    rect(x+2,y+27,13,9,shade); rect(x-5,y+24,10,7,green); rect(x-8,y+25,5,4,highlight);
+    // torso and back
+    rect(x+8,y+18,27,25,green); rect(x+12,y+20,19,18,light); rect(x+13,y+34,16,6,cream);
+    // neck, head, muzzle
+    rect(x+24,y+10,13,19,light); rect(x+26,y+2,21,19,green); rect(x+37,y+14,16,8,green);
+    rect(x+39,y+19,13,5,shade); rect(x+43,y+17,7,3,highlight);
+    // back spikes
+    rect(x+8,y+13,7,7,light); rect(x+16,y+10,7,7,highlight); rect(x+24,y+8,7,6,light);
+    // nostril and expressive eye
+    rect(x+49,y+16,2,2,shade);
+    if (dino.blink>0) rect(x+39,y+7,5,2,cream);
+    else { rect(x+39,y+5,6,6,cream); rect(x+42,y+7,3,3,"#172321"); rect(x+42,y+7,1,1,"#ffffff"); }
+    // tiny arm
+    rect(x+34,y+25,7,3,shade); rect(x+39,y+26,4,3,light);
+    // alternating legs with feet and toes
+    if(airborne) {
+      rect(x+12,y+40,7,10,shade); rect(x+27,y+40,7,8,shade);
+      rect(x+7,y+49,14,4,green); rect(x+25,y+47,13,4,green);
     } else if(run===0) {
       rect(x+12,y+40,7,10,shade); rect(x+25,y+40,7,7,shade);
-      rect(x+8,y+48,13,4,green); rect(x+23,y+45,12,4,green);
+      rect(x+7,y+48,15,4,green); rect(x+23,y+45,14,4,green);
+      rect(x+8,y+51,4,2,highlight);
     } else {
       rect(x+13,y+40,7,7,shade); rect(x+27,y+40,7,10,shade);
-      rect(x+9,y+45,12,4,green); rect(x+25,y+48,13,4,green);
+      rect(x+8,y+45,14,4,green); rect(x+25,y+48,15,4,green);
+      rect(x+35,y+51,4,2,highlight);
+    }
+    ctx.restore();
+    // speed streaks at high speed
+    if(speed/6>1.45 && state==="running" && Math.floor(dino.anim)%3===0) {
+      ctx.globalAlpha=.45; rect(x-15,y+20,10,2,"#fff0c4"); rect(x-21,y+29,7,2,"#fff0c4"); ctx.globalAlpha=1;
     }
   }
   function spawnObstacle() {
@@ -205,14 +239,17 @@ game_html = r"""
   function drawObstacle(o) {
     if(o.type==="bird") {
       const wing=Math.floor(o.frame/8)%2;
-      // Chim bay: thân, đầu, mỏ, mắt và cánh vỗ rõ ràng
+      // Chim pixel-art có đuôi, lông cánh và hoạt ảnh vỗ cánh.
       rect(o.x+7,o.y+9,23,10,"#3b3838"); rect(o.x+25,o.y+5,10,10,"#3b3838");
       rect(o.x+33,o.y+8,9,4,"#e59a42"); rect(o.x+28,o.y+7,3,3,"#fff0bd");
       rect(o.x+29,o.y+8,1,1,"#1b2524");
+      rect(o.x+3,o.y+10,7,5,"#66564b"); rect(o.x+1,o.y+8,4,4,"#8b715c");
       if (wing) {
         rect(o.x+11,o.y+1,7,8,"#66564b"); rect(o.x+16,o.y-4,8,8,"#66564b");
+        rect(o.x+18,o.y-7,6,5,"#8b715c");
       } else {
         rect(o.x+11,o.y+17,8,7,"#66564b"); rect(o.x+17,o.y+20,8,4,"#66564b");
+        rect(o.x+19,o.y+23,6,3,"#8b715c");
       }
       rect(o.x+8,o.y+12,6,4,"#786254");
     } else {
@@ -234,10 +271,16 @@ game_html = r"""
     const speedMultiplier = speed / 6;
     score += dt * difficulty.scoreRate * speedMultiplier;
     speed = Math.min(6 * difficulty.max, 6 * difficulty.base + score * difficulty.growth);
-    dino.anim += dt*22;
+    dino.anim += dt*22*(speed/6);
+    dino.squash += ((dino.onGround ? 1 + Math.sin(dino.anim*0.45)*0.035 : 1.05) - dino.squash) * Math.min(1,dt*12);
+    dino.blink = (Math.sin(elapsed*1.7)>0.995) ? 0.08 : Math.max(0,dino.blink-dt);
+    dino.trail += dt;
     dino.vy += 36*dt;
     dino.y += dino.vy;
-    if(dino.y >= groundY-dino.h) { dino.y=groundY-dino.h; dino.vy=0; dino.onGround=true; }
+    if(dino.y >= groundY-dino.h) {
+      if(!dino.onGround && dino.vy>4) { puff(dino.x+20,groundY-2,5,"#d9a25e"); dino.squash=.9; }
+      dino.y=groundY-dino.h; dino.vy=0; dino.onGround=true;
+    }
     spawnTimer -= dt;
     if(spawnTimer<=0) { spawnObstacle(); spawnTimer=rand(.9,1.55)*Math.max(.62,7/speed); }
     obstacles.forEach(o=>{ o.x -= speed*60*dt; o.frame+=dt*25; });
@@ -247,7 +290,8 @@ game_html = r"""
       const box={x:o.x,y:o.y,w:o.w,h:o.h};
       if(intersects(hitbox,box)) {
         state="over";
-        puff(dino.x+24,dino.y+28,18,"#d77b45");
+        screenShake=0.22;
+        puff(dino.x+24,dino.y+28,24,"#d77b45");
         if(Math.floor(score)>best) {
           best=Math.floor(score);
           try { localStorage.setItem("dinoRunBest",String(best)); } catch (_) {}
@@ -274,6 +318,9 @@ game_html = r"""
     lines.forEach((line,i)=>ctx.fillText(line,W/2,198+i*29));
   }
   function render(dt) {
+    if(screenShake>0) screenShake=Math.max(0,screenShake-dt);
+    ctx.save();
+    if(screenShake>0) ctx.translate(rand(-5,5),rand(-3,3));
     drawBackground(dt);
     // distant pixel stars at night
     if(score>450) {
@@ -287,6 +334,7 @@ game_html = r"""
     if(state==="ready") overlay("DINO RUN",["NHẤN BẮT ĐẦU ĐỂ CHƠI","SPACE / ↑ ĐỂ NHẢY"]);
     else if(state==="paused") overlay("TẠM DỪNG",["Nhấn P hoặc nút tiếp tục"]);
     else if(state==="over") overlay("GAME OVER",["Điểm: "+Math.floor(score),"Nhấn BẮT ĐẦU ĐỂ THỬ LẠI"]);
+    ctx.restore();
   }
   function frame(now) {
     const dt=Math.min(.035,Math.max(0,(now-lastTime)/1000 || 0));
