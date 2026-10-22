@@ -1,1 +1,283 @@
 
+import streamlit as st
+import streamlit.components.v1 as components
+
+st.set_page_config(
+    page_title="DINO RUN: Lost World",
+    page_icon="🦖",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    .stApp { background: #101820; color: #f6f0d8; }
+    header[data-testid="stHeader"] { background: transparent; }
+    .block-container { max-width: 1100px; padding-top: 1.2rem; padding-bottom: 1rem; }
+    h1 { font-family: 'Press Start 2P', monospace !important; color: #f7d774 !important; font-size: clamp(1.2rem, 3vw, 2rem) !important; line-height: 1.6 !important; }
+    .intro { color: #c8d5c4; margin-bottom: .6rem; }
+    div[data-testid="stMarkdownContainer"] p { color: #d8e2d0; }
+    .stAlert { background: #1a2b30; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("DINO RUN")
+st.markdown('<div class="intro">LOST WORLD • Chạy, nhảy và sống sót giữa vùng đất tiền sử.</div>', unsafe_allow_html=True)
+
+game_html = r"""
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:#101820; color:#f6f0d8; font-family:monospace; }
+  #wrap { width:100%; max-width:1000px; margin:0 auto; }
+  #hud { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 12px; background:#1a2b30; border:3px solid #344b45; border-bottom:0; font-weight:bold; letter-spacing:1px; }
+  .stat { color:#f7d774; }
+  canvas { display:block; width:100%; height:auto; image-rendering:pixelated; border:3px solid #344b45; background:#f5c56b; touch-action:manipulation; }
+  #controls { display:flex; justify-content:center; gap:10px; padding:12px 0 2px; flex-wrap:wrap; }
+  button { font-family:monospace; font-weight:bold; font-size:14px; color:#f6f0d8; background:#2c493f; border:3px solid #67835c; border-bottom-width:5px; padding:12px 18px; cursor:pointer; touch-action:manipulation; }
+  button:active { transform:translateY(2px); border-bottom-width:3px; }
+  #hint { text-align:center; color:#c8d5c4; font-size:12px; line-height:1.7; padding:8px 4px 12px; }
+  @media (max-width:600px) { #hud { font-size:12px; } button { flex:1; padding:12px 8px; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="hud">
+    <span>ĐIỂM: <span id="score" class="stat">00000</span></span>
+    <span>KỶ LỤC: <span id="best" class="stat">00000</span></span>
+    <span>TỐC ĐỘ: <span id="speed" class="stat">1.0x</span></span>
+  </div>
+  <canvas id="game" width="960" height="400" aria-label="Trò chơi khủng long chạy vô tận"></canvas>
+  <div id="controls">
+    <button id="startBtn">▶ BẮT ĐẦU / CHƠI LẠI</button>
+    <button id="jumpBtn">⬆ NHẢY</button>
+    <button id="pauseBtn">Ⅱ TẠM DỪNG</button>
+  </div>
+  <div id="hint">Bàn phím: SPACE / ↑ để nhảy · P để tạm dừng · Enter để bắt đầu lại<br>Trên điện thoại: chạm nút NHẢY hoặc chạm vào khu vực trò chơi.</div>
+</div>
+<script>
+(() => {
+  "use strict";
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const bestEl = document.getElementById("best");
+  const speedEl = document.getElementById("speed");
+  const startBtn = document.getElementById("startBtn");
+  const jumpBtn = document.getElementById("jumpBtn");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const W = canvas.width, H = canvas.height, groundY = 318;
+  let state = "ready"; // ready, running, paused, over
+  let lastTime = 0, elapsed = 0, score = 0, speed = 6, spawnTimer = 0, cloudTimer = 0;
+  let obstacles = [], particles = [], clouds = [];
+  let best = 0;
+  try { best = Number(localStorage.getItem("dinoRunBest") || 0) || 0; } catch (_) {}
+  bestEl.textContent = String(best).padStart(5, "0");
+
+  const dino = { x: 112, y: groundY - 52, w: 48, h: 52, vy: 0, onGround: true, duck: false, anim: 0 };
+  const rand = (a,b) => a + Math.random() * (b-a);
+
+  function reset() {
+    state = "running"; elapsed = 0; score = 0; speed = 6; spawnTimer = 0.85;
+    obstacles = []; particles = []; clouds = [];
+    dino.y = groundY - dino.h; dino.vy = 0; dino.onGround = true; dino.duck = false; dino.anim = 0;
+    for (let i=0;i<5;i++) clouds.push({x:rand(0,W), y:rand(35,135), s:rand(.7,1.5)});
+    lastTime = performance.now();
+  }
+  function jump() {
+    if (state === "ready" || state === "over") { reset(); return; }
+    if (state !== "running") return;
+    if (dino.onGround) { dino.vy = -14.5; dino.onGround = false; puff(dino.x+8, groundY-2, 7, "#e8a65b"); }
+  }
+  function togglePause() {
+    if (state === "running") state = "paused";
+    else if (state === "paused") { state = "running"; lastTime = performance.now(); }
+  }
+  function puff(x,y,n,color) {
+    for(let i=0;i<n;i++) particles.push({x,y,vx:rand(-2,2),vy:rand(-3,0),life:rand(.2,.6),max:.6,color,size:rand(2,5)});
+  }
+  function rect(x,y,w,h,c) { ctx.fillStyle=c; ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h)); }
+  function drawCloud(c) {
+    const x=c.x, y=c.y, s=c.s;
+    rect(x,y+8*s,34*s,10*s,"#fff0c4"); rect(x+7*s,y,15*s,12*s,"#fff0c4");
+    rect(x+19*s,y+3*s,14*s,12*s,"#fff0c4"); rect(x+4*s,y+13*s,32*s,5*s,"#f7dca0");
+  }
+  function drawBackground(dt) {
+    const night = Math.min(1, Math.max(0, (score-450)/900));
+    const top = [245,197,107], bottom = [255,230,165], darkTop=[30,48,70], darkBottom=[73,91,91];
+    const mix=(a,b,t)=>a+(b-a)*t;
+    const rgb=(a,b,t)=>`rgb(${mix(a[0],b[0],t)},${mix(a[1],b[1],t)},${mix(a[2],b[2],t)})`;
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,rgb(top,darkTop,night)); grad.addColorStop(1,rgb(bottom,darkBottom,night));
+    ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+    // sun / moon
+    if(night < .65) { rect(765,55,46,46,"#ffe59a"); rect(775,45,26,10,"#ffe59a"); }
+    else { rect(765,55,38,38,"#e7f0dc"); rect(785,48,25,38,rgb(top,darkTop,night)); }
+    // distant mountains
+    ctx.fillStyle = night > .5 ? "#40545a" : "#d69b57";
+    ctx.beginPath(); ctx.moveTo(0,250); ctx.lineTo(105,155); ctx.lineTo(185,235); ctx.lineTo(310,145); ctx.lineTo(435,250); ctx.lineTo(555,180); ctx.lineTo(680,250); ctx.lineTo(820,165); ctx.lineTo(960,250); ctx.lineTo(960,groundY); ctx.lineTo(0,groundY); ctx.fill();
+    ctx.fillStyle = night > .5 ? "#344b50" : "#c9874c";
+    ctx.beginPath(); ctx.moveTo(0,275); ctx.lineTo(180,220); ctx.lineTo(330,275); ctx.lineTo(500,215); ctx.lineTo(680,275); ctx.lineTo(830,220); ctx.lineTo(960,270); ctx.lineTo(960,groundY); ctx.lineTo(0,groundY); ctx.fill();
+    clouds.forEach(c => drawCloud(c));
+    // ground
+    rect(0,groundY,W,H-groundY, night>.5 ? "#6c6650" : "#e6b66c");
+    rect(0,groundY,W,5, night>.5 ? "#c1b17b" : "#805d3d");
+    const offset = (elapsed*speed*1.7)%80;
+    for(let x=-offset;x<W;x+=80) {
+      rect(x,groundY+17,28,4,night>.5?"#514f42":"#c48a4d");
+      rect(x+35,groundY+37,13,3,night>.5?"#514f42":"#c48a4d");
+    }
+    // tiny desert plants
+    for(let i=0;i<8;i++) {
+      const x=((i*137 - elapsed*speed*.38)% (W+80)+W+80)%(W+80);
+      rect(x,groundY-9,3,9,night>.5?"#526b4c":"#638047");
+      rect(x-4,groundY-6,4,3,night>.5?"#526b4c":"#638047");
+    }
+  }
+  function drawDino() {
+    const x=dino.x, y=dino.y, run=Math.floor(dino.anim/7)%2;
+    const green="#36784b", light="#64a95b", shade="#214c3c", cream="#e8d99d";
+    // tail
+    rect(x,y+27,12,9,shade); rect(x-8,y+24,10,7,green);
+    // body and neck
+    rect(x+8,y+18,26,25,green); rect(x+23,y+9,13,19,light);
+    rect(x+26,y+2,21,19,green); rect(x+38,y+14,14,8,green);
+    // jaw
+    rect(x+35,y+19,16,5,shade);
+    // spikes
+    rect(x+9,y+12,7,7,light); rect(x+18,y+9,7,7,light); rect(x+27,y+7,6,6,light);
+    // eye
+    rect(x+39,y+6,4,4,"#fff5d5"); rect(x+41,y+7,2,2,"#1c2b26");
+    // belly
+    rect(x+13,y+31,16,7,cream);
+    // legs animate
+    if(!dino.onGround) {
+      rect(x+12,y+40,7,11,shade); rect(x+27,y+40,7,9,shade);
+      rect(x+7,y+49,13,3,green); rect(x+25,y+48,13,3,green);
+    } else if(run===0) {
+      rect(x+12,y+40,7,10,shade); rect(x+25,y+40,7,7,shade);
+      rect(x+8,y+48,13,4,green); rect(x+23,y+45,12,4,green);
+    } else {
+      rect(x+13,y+40,7,7,shade); rect(x+27,y+40,7,10,shade);
+      rect(x+9,y+45,12,4,green); rect(x+25,y+48,13,4,green);
+    }
+  }
+  function spawnObstacle() {
+    const bird = score > 180 && Math.random() < Math.min(.27, .08 + score/2200);
+    if (bird) {
+      obstacles.push({type:"bird",x:W+20,y:rand(225,270),w:38,h:25,frame:0});
+    } else {
+      const tall = Math.random() < .3;
+      obstacles.push({type:"cactus",x:W+20,y:groundY-(tall?56:38),w:tall?28:22,h:tall?56:38,tall});
+    }
+  }
+  function drawObstacle(o) {
+    if(o.type==="bird") {
+      const wing=Math.floor(o.frame/8)%2;
+      rect(o.x+8,o.y+8,23,12,"#544b42"); rect(o.x+26,o.y+5,9,8,"#544b42");
+      rect(o.x+32,o.y+7,8,4,"#d58b45"); rect(o.x+13,o.y+5,9,wing?3:13,"#786254");
+      rect(o.x+16,o.y+10,3,3,"#f4dc8c");
+    } else {
+      rect(o.x+7,o.y,10,o.h,"#477744"); rect(o.x+2,o.y+12,8,5,"#477744");
+      rect(o.x+2,o.y+7,5,12,"#477744"); rect(o.x+15,o.y+20,10,5,"#477744");
+      rect(o.x+20,o.y+14,5,13,"#477744"); rect(o.x+4,o.y+o.h-5,o.w+3,5,"#2e5d3c");
+      rect(o.x+9,o.y+4,3,Math.max(5,o.h-12),"#72a45b");
+    }
+  }
+  function intersects(a,b) {
+    const pad=7;
+    return a.x+pad < b.x+b.w-pad && a.x+a.w-pad > b.x+pad &&
+           a.y+pad < b.y+b.h-pad && a.y+a.h-pad > b.y+pad;
+  }
+  function update(dt) {
+    if(state!=="running") return;
+    elapsed += dt;
+    score += dt*10;
+    speed = Math.min(14, 6 + score/260);
+    dino.anim += dt*22;
+    dino.vy += 36*dt;
+    dino.y += dino.vy;
+    if(dino.y >= groundY-dino.h) { dino.y=groundY-dino.h; dino.vy=0; dino.onGround=true; }
+    spawnTimer -= dt;
+    if(spawnTimer<=0) { spawnObstacle(); spawnTimer=rand(.9,1.55)*Math.max(.62,7/speed); }
+    obstacles.forEach(o=>{ o.x -= speed*60*dt; o.frame+=dt*25; });
+    obstacles = obstacles.filter(o=>o.x+o.w>-10);
+    const hitbox={x:dino.x+4,y:dino.y+4,w:dino.w-8,h:dino.h-6};
+    for(const o of obstacles) {
+      const box={x:o.x,y:o.y,w:o.w,h:o.h};
+      if(intersects(hitbox,box)) {
+        state="over";
+        puff(dino.x+24,dino.y+28,18,"#d77b45");
+        if(Math.floor(score)>best) {
+          best=Math.floor(score);
+          try { localStorage.setItem("dinoRunBest",String(best)); } catch (_) {}
+        }
+        bestEl.textContent=String(best).padStart(5,"0");
+        break;
+      }
+    }
+    cloudTimer += dt;
+    clouds.forEach(c=>c.x-=speed*.12*c.s);
+    clouds=clouds.filter(c=>c.x>-70);
+    if(clouds.length<5 && cloudTimer>.8) { clouds.push({x:W+20,y:rand(35,135),s:rand(.7,1.5)}); cloudTimer=0; }
+    particles.forEach(p=>{p.x+=p.vx*60*dt;p.y+=p.vy*60*dt;p.vy+=.12;p.life-=dt;});
+    particles=particles.filter(p=>p.life>0);
+    scoreEl.textContent=String(Math.floor(score)).padStart(5,"0");
+    speedEl.textContent=(speed/6).toFixed(1)+"x";
+  }
+  function overlay(title, lines) {
+    ctx.fillStyle="rgba(16,24,32,.66)"; ctx.fillRect(0,0,W,H);
+    ctx.textAlign="center";
+    ctx.fillStyle="#f7d774"; ctx.font="bold 30px monospace"; ctx.fillText(title,W/2,155);
+    ctx.fillStyle="#fff0c4"; ctx.font="bold 16px monospace";
+    lines.forEach((line,i)=>ctx.fillText(line,W/2,198+i*29));
+  }
+  function render(dt) {
+    drawBackground(dt);
+    // distant pixel stars at night
+    if(score>450) {
+      ctx.fillStyle="#f8edc1";
+      for(let i=0;i<28;i++) { const x=(i*83+17)%W, y=(i*47+13)%145; ctx.fillRect(x,y,2,2); }
+    }
+    obstacles.forEach(drawObstacle);
+    drawDino();
+    particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/p.max);rect(p.x,p.y,p.size,p.size,p.color);});
+    ctx.globalAlpha=1;
+    if(state==="ready") overlay("DINO RUN",["NHẤN BẮT ĐẦU ĐỂ CHƠI","SPACE / ↑ ĐỂ NHẢY"]);
+    else if(state==="paused") overlay("TẠM DỪNG",["Nhấn P hoặc nút tiếp tục"]);
+    else if(state==="over") overlay("GAME OVER",["Điểm: "+Math.floor(score),"Nhấn BẮT ĐẦU ĐỂ THỬ LẠI"]);
+  }
+  function frame(now) {
+    const dt=Math.min(.035,Math.max(0,(now-lastTime)/1000 || 0));
+    lastTime=now;
+    update(dt);
+    render(dt);
+    requestAnimationFrame(frame);
+  }
+  startBtn.addEventListener("click",reset);
+  jumpBtn.addEventListener("click",jump);
+  pauseBtn.addEventListener("click",togglePause);
+  canvas.addEventListener("pointerdown",()=>{ if(state==="ready"||state==="over") reset(); else jump(); });
+  window.addEventListener("keydown",e=>{
+    if(["Space","ArrowUp","ArrowDown"].includes(e.code)) e.preventDefault();
+    if(e.code==="Space"||e.code==="ArrowUp") { if(!e.repeat) jump(); }
+    else if(e.code==="Enter") { if(state!=="running") reset(); }
+    else if(e.code==="KeyP") togglePause();
+  },{passive:false});
+  // Prevent accidental scroll while using the jump button on touch devices.
+  jumpBtn.addEventListener("touchstart",e=>e.preventDefault(),{passive:false});
+  reset(); state="ready"; lastTime=performance.now(); render(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
+"""
+
+components.html(game_html, height=540, scrolling=False)
+st.caption("DINO RUN: LOST WORLD · Game chạy trong trình duyệt. Kỷ lục được lưu cục bộ trên trình duyệt hiện tại.")
