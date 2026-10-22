@@ -1,4 +1,3 @@
-
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -168,7 +167,7 @@ game_html = r"""
     }
   }
   function spawnObstacle() {
-    const bird = score > 180 && Math.random() < Math.min(.27, .08 + score/2200);
+    const bird = score > 80 && Math.random() < Math.min(.55, .28 + score/1800);
     if (bird) {
       obstacles.push({type:"bird",x:W+20,y:rand(225,270),w:38,h:25,frame:0});
     } else {
@@ -179,9 +178,16 @@ game_html = r"""
   function drawObstacle(o) {
     if(o.type==="bird") {
       const wing=Math.floor(o.frame/8)%2;
-      rect(o.x+8,o.y+8,23,12,"#544b42"); rect(o.x+26,o.y+5,9,8,"#544b42");
-      rect(o.x+32,o.y+7,8,4,"#d58b45"); rect(o.x+13,o.y+5,9,wing?3:13,"#786254");
-      rect(o.x+16,o.y+10,3,3,"#f4dc8c");
+      // Chim bay: thân, đầu, mỏ, mắt và cánh vỗ rõ ràng
+      rect(o.x+7,o.y+9,23,10,"#3b3838"); rect(o.x+25,o.y+5,10,10,"#3b3838");
+      rect(o.x+33,o.y+8,9,4,"#e59a42"); rect(o.x+28,o.y+7,3,3,"#fff0bd");
+      rect(o.x+29,o.y+8,1,1,"#1b2524");
+      if (wing) {
+        rect(o.x+11,o.y+1,7,8,"#66564b"); rect(o.x+16,o.y-4,8,8,"#66564b");
+      } else {
+        rect(o.x+11,o.y+17,8,7,"#66564b"); rect(o.x+17,o.y+20,8,4,"#66564b");
+      }
+      rect(o.x+8,o.y+12,6,4,"#786254");
     } else {
       rect(o.x+7,o.y,10,o.h,"#477744"); rect(o.x+2,o.y+12,8,5,"#477744");
       rect(o.x+2,o.y+7,5,12,"#477744"); rect(o.x+15,o.y+20,10,5,"#477744");
