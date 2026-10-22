@@ -49,7 +49,19 @@ game_html = r"""
   <div id="hud">
     <span>ĐIỂM: <span id="score" class="stat">00000</span></span>
     <span>KỶ LỤC: <span id="best" class="stat">00000</span></span>
+    <span>ĐỘ KHÓ: <span id="difficulty" class="stat">BÌNH THƯỜNG</span></span>
     <span>TỐC ĐỘ: <span id="speed" class="stat">1.0x</span></span>
+    <span>HỆ SỐ ĐIỂM: <span id="multiplier" class="stat">1.0x</span></span>
+  </div>
+  <div id="difficultyBar" style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:10px;background:#142329;border:3px solid #344b45;border-bottom:0;">
+    <label for="difficultySelect" style="font-weight:bold;color:#c8d5c4;">CHỌN ĐỘ KHÓ:</label>
+    <select id="difficultySelect" style="font: bold 14px monospace;color:#f6f0d8;background:#2c493f;border:2px solid #67835c;padding:8px;">
+      <option value="easy">DỄ — 0.75x</option>
+      <option value="normal" selected>BÌNH THƯỜNG — 1.0x</option>
+      <option value="hard">KHÓ — 1.5x</option>
+      <option value="extreme">ÁC MỘNG — 2.0x</option>
+    </select>
+    <span style="font-size:12px;color:#c8d5c4;">Đổi độ khó trước khi bắt đầu hoặc khi chơi lại.</span>
   </div>
   <canvas id="game" width="960" height="400" aria-label="Trò chơi khủng long chạy vô tận"></canvas>
   <div id="controls">
@@ -67,6 +79,9 @@ game_html = r"""
   const scoreEl = document.getElementById("score");
   const bestEl = document.getElementById("best");
   const speedEl = document.getElementById("speed");
+  const difficultyEl = document.getElementById("difficulty");
+  const multiplierEl = document.getElementById("multiplier");
+  const difficultySelect = document.getElementById("difficultySelect");
   const startBtn = document.getElementById("startBtn");
   const jumpBtn = document.getElementById("jumpBtn");
   const pauseBtn = document.getElementById("pauseBtn");
@@ -74,6 +89,14 @@ game_html = r"""
   let state = "ready"; // ready, running, paused, over
   let lastTime = 0, elapsed = 0, score = 0, speed = 6, spawnTimer = 0, cloudTimer = 0;
   let obstacles = [], particles = [], clouds = [];
+  const difficultySettings = {
+    easy:    {label:"DỄ", base:0.75, growth:0.0009, max:1.8, scoreRate:10},
+    normal:  {label:"BÌNH THƯỜNG", base:1.0, growth:0.0015, max:2.5, scoreRate:10},
+    hard:    {label:"KHÓ", base:1.5, growth:0.0020, max:3.2, scoreRate:12},
+    extreme: {label:"ÁC MỘNG", base:2.0, growth:0.0025, max:4.0, scoreRate:14}
+  };
+  let difficultyKey = difficultySelect.value;
+  let difficulty = difficultySettings[difficultyKey];
   let best = 0;
   try { best = Number(localStorage.getItem("dinoRunBest") || 0) || 0; } catch (_) {}
   bestEl.textContent = String(best).padStart(5, "0");
@@ -82,8 +105,12 @@ game_html = r"""
   const rand = (a,b) => a + Math.random() * (b-a);
 
   function reset() {
-    state = "running"; elapsed = 0; score = 0; speed = 6; spawnTimer = 0.85;
+    difficultyKey = difficultySelect.value;
+    difficulty = difficultySettings[difficultyKey];
+    state = "running"; elapsed = 0; score = 0; speed = 6 * difficulty.base; spawnTimer = 0.85;
     obstacles = []; particles = []; clouds = [];
+    difficultyEl.textContent = difficulty.label;
+    multiplierEl.textContent = difficulty.base.toFixed(1) + "x";
     dino.y = groundY - dino.h; dino.vy = 0; dino.onGround = true; dino.duck = false; dino.anim = 0;
     for (let i=0;i<5;i++) clouds.push({x:rand(0,W), y:rand(35,135), s:rand(.7,1.5)});
     lastTime = performance.now();
@@ -203,8 +230,10 @@ game_html = r"""
   function update(dt) {
     if(state!=="running") return;
     elapsed += dt;
-    score += dt*10;
-    speed = Math.min(14, 6 + score/260);
+    // Tốc độ ảnh hưởng trực tiếp đến tốc độ cộng điểm.
+    const speedMultiplier = speed / 6;
+    score += dt * difficulty.scoreRate * speedMultiplier;
+    speed = Math.min(6 * difficulty.max, 6 * difficulty.base + score * difficulty.growth);
     dino.anim += dt*22;
     dino.vy += 36*dt;
     dino.y += dino.vy;
@@ -235,6 +264,7 @@ game_html = r"""
     particles=particles.filter(p=>p.life>0);
     scoreEl.textContent=String(Math.floor(score)).padStart(5,"0");
     speedEl.textContent=(speed/6).toFixed(1)+"x";
+    multiplierEl.textContent=(speed/6).toFixed(1)+"x";
   }
   function overlay(title, lines) {
     ctx.fillStyle="rgba(16,24,32,.66)"; ctx.fillRect(0,0,W,H);
@@ -265,6 +295,14 @@ game_html = r"""
     render(dt);
     requestAnimationFrame(frame);
   }
+  difficultySelect.addEventListener("change", () => {
+    const selected = difficultySettings[difficultySelect.value];
+    if (state !== "running" && state !== "paused") {
+      difficultyEl.textContent = selected.label;
+      speedEl.textContent = selected.base.toFixed(1) + "x";
+      multiplierEl.textContent = selected.base.toFixed(1) + "x";
+    }
+  });
   startBtn.addEventListener("click",reset);
   jumpBtn.addEventListener("click",jump);
   pauseBtn.addEventListener("click",togglePause);
