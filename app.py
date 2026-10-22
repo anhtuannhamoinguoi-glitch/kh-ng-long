@@ -68,8 +68,9 @@ game_html = r"""
     <button id="startBtn">▶ BẮT ĐẦU / CHƠI LẠI</button>
     <button id="jumpBtn">⬆ NHẢY</button>
     <button id="pauseBtn">Ⅱ TẠM DỪNG</button>
+    <button id="soundBtn" aria-pressed="true">🔊 ÂM THANH: BẬT</button>
   </div>
-  <div id="hint">Bàn phím: SPACE / ↑ để nhảy · P để tạm dừng · Enter để bắt đầu lại<br>Trên điện thoại: chạm nút NHẢY hoặc chạm vào khu vực trò chơi.</div>
+  <div id="hint">Bật âm thanh bằng nút 🔊. Âm thanh sẽ hoạt động sau lần bấm đầu tiên vào game.<br>Bàn phím: SPACE / ↑ để nhảy · P để tạm dừng · Enter để bắt đầu lại<br>Trên điện thoại: chạm nút NHẢY hoặc chạm vào khu vực trò chơi.</div>
 </div>
 <script>
 (() => {
@@ -85,7 +86,63 @@ game_html = r"""
   const startBtn = document.getElementById("startBtn");
   const jumpBtn = document.getElementById("jumpBtn");
   const pauseBtn = document.getElementById("pauseBtn");
+  const soundBtn = document.getElementById("soundBtn");
   const W = canvas.width, H = canvas.height, groundY = 318;
+
+  // Âm thanh được tạo trực tiếp bằng Web Audio API, không cần tải file MP3.
+  let audioCtx = null;
+  let soundEnabled = true;
+  let lastMilestone = 0;
+  function initAudio() {
+    if (!soundEnabled) return false;
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return false;
+      if (!audioCtx) audioCtx = new AudioContextClass();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      return true;
+    } catch (_) { return false; }
+  }
+  function tone(freq, duration, type="square", volume=0.045, endFreq=null, delay=0) {
+    if (!initAudio()) return;
+    const startAt = audioCtx.currentTime + delay;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(Math.max(1, freq), startAt);
+    if (endFreq !== null) osc.frequency.exponentialRampToValueAtTime(Math.max(1, endFreq), startAt + duration);
+    gain.gain.setValueAtTime(0.0001, startAt);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), startAt + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(startAt); osc.stop(startAt + duration + 0.025);
+  }
+  function playSound(name) {
+    if (!soundEnabled) return;
+    if (name === "jump") {
+      tone(360, 0.11, "square", 0.035, 620);
+      tone(620, 0.09, "triangle", 0.022, 780, 0.045);
+    } else if (name === "land") {
+      tone(125, 0.055, "triangle", 0.018, 75);
+    } else if (name === "hit") {
+      tone(190, 0.20, "sawtooth", 0.055, 48);
+      tone(95, 0.28, "square", 0.035, 38, 0.07);
+    } else if (name === "start") {
+      tone(440, 0.08, "square", 0.025, 550);
+      tone(660, 0.12, "square", 0.03, 880, 0.09);
+    } else if (name === "pause") {
+      tone(500, 0.08, "triangle", 0.025, 300);
+    } else if (name === "milestone") {
+      tone(660, 0.07, "square", 0.025, 740);
+      tone(880, 0.12, "square", 0.028, 1100, 0.075);
+    }
+  }
+  soundBtn.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    soundBtn.textContent = soundEnabled ? "🔊 ÂM THANH: BẬT" : "🔇 ÂM THANH: TẮT";
+    soundBtn.setAttribute("aria-pressed", String(soundEnabled));
+    if (soundEnabled) { initAudio(); playSound("start"); }
+  });
   let state = "ready"; // ready, running, paused, over
   let lastTime = 0, elapsed = 0, score = 0, speed = 6, spawnTimer = 0, cloudTimer = 0;
   let obstacles = [], particles = [], clouds = [], ambientDust = [];
@@ -109,7 +166,9 @@ game_html = r"""
     difficultyKey = difficultySelect.value;
     difficulty = difficultySettings[difficultyKey];
     state = "running"; elapsed = 0; score = 0; speed = 6 * difficulty.base; spawnTimer = 0.85;
+    lastMilestone = 0;
     obstacles = []; particles = []; clouds = [];
+    initAudio(); playSound("start");
     difficultyEl.textContent = difficulty.label;
     multiplierEl.textContent = difficulty.base.toFixed(1) + "x";
     dino.y = groundY - dino.h; dino.vy = 0; dino.onGround = true; dino.duck = false; dino.anim = 0;
@@ -119,11 +178,11 @@ game_html = r"""
   function jump() {
     if (state === "ready" || state === "over") { reset(); return; }
     if (state !== "running") return;
-    if (dino.onGround) { dino.vy = -14.5; dino.onGround = false; puff(dino.x+8, groundY-2, 7, "#e8a65b"); }
+    if (dino.onGround) { dino.vy = -14.5; dino.onGround = false; puff(dino.x+8, groundY-2, 7, "#e8a65b"); playSound("jump"); }
   }
   function togglePause() {
-    if (state === "running") state = "paused";
-    else if (state === "paused") { state = "running"; lastTime = performance.now(); }
+    if (state === "running") { state = "paused"; playSound("pause"); }
+    else if (state === "paused") { state = "running"; lastTime = performance.now(); playSound("start"); }
   }
   function puff(x,y,n,color) {
     for(let i=0;i<n;i++) particles.push({x,y,vx:rand(-2,2),vy:rand(-3,0),life:rand(.2,.6),max:.6,color,size:rand(2,5)});
@@ -278,7 +337,7 @@ game_html = r"""
     dino.vy += 36*dt;
     dino.y += dino.vy;
     if(dino.y >= groundY-dino.h) {
-      if(!dino.onGround && dino.vy>4) { puff(dino.x+20,groundY-2,5,"#d9a25e"); dino.squash=.9; }
+      if(!dino.onGround && dino.vy>4) { puff(dino.x+20,groundY-2,5,"#d9a25e"); dino.squash=.9; playSound("land"); }
       dino.y=groundY-dino.h; dino.vy=0; dino.onGround=true;
     }
     spawnTimer -= dt;
@@ -291,6 +350,7 @@ game_html = r"""
       if(intersects(hitbox,box)) {
         state="over";
         screenShake=0.22;
+        playSound("hit");
         puff(dino.x+24,dino.y+28,24,"#d77b45");
         if(Math.floor(score)>best) {
           best=Math.floor(score);
@@ -307,6 +367,11 @@ game_html = r"""
     particles.forEach(p=>{p.x+=p.vx*60*dt;p.y+=p.vy*60*dt;p.vy+=.12;p.life-=dt;});
     particles=particles.filter(p=>p.life>0);
     scoreEl.textContent=String(Math.floor(score)).padStart(5,"0");
+    const milestone = Math.floor(score / 100) * 100;
+    if (milestone >= 100 && milestone > lastMilestone) {
+      lastMilestone = milestone;
+      playSound("milestone");
+    }
     speedEl.textContent=(speed/6).toFixed(1)+"x";
     multiplierEl.textContent=(speed/6).toFixed(1)+"x";
   }
